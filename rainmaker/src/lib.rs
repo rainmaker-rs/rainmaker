@@ -18,7 +18,7 @@ mod rmaker_mqtt;
 
 // expose rainmaker_components crate for use in downstream crates
 use constants::*;
-use error::RMakerError;
+use error::RmakerError;
 use node::Node;
 use proto::esp_rmaker_user_mapping::*;
 use quick_protobuf::{MessageWrite, Writer};
@@ -83,12 +83,12 @@ impl Rainmaker {
     ///             ./rainmaker.py claim --mac <MAC addr> /dev/null
     ///         ```
     ///     3. Set the "RMAKER_CLAIMDATA_PATH" environment variable to the folder containing the Node X509 certificate and key (usually stored at ```/home/<user>/.espressif/rainmaker/claim_data/<acc_id>/<mac_addr>```)
-    pub fn init() -> Result<&'static mut Self, RMakerError> {
+    pub fn init() -> Result<&'static mut Self, RmakerError> {
         #[cfg(target_os = "linux")]
         Self::linux_init_claimdata();
 
         if unsafe { RAINMAKER.get().is_some() } {
-            return Err(RMakerError("Rainmaker already initialized".to_string()));
+            return Err(RmakerError::AlreadyInitialized);
         }
         unsafe {
             RAINMAKER.set(Self { node: None }).unwrap();
@@ -105,7 +105,7 @@ impl Rainmaker {
     ///
     /// Reports node configuration and initial values of parameters, subscribe to respective topics and wait for commands.
     /// # Ensure agent(node) is initialized and WiFi is connected before using this function.
-    pub fn start(&mut self) -> Result<(), RMakerError> {
+    pub fn start(&mut self) -> Result<(), RmakerError> {
         // initialize mqtt if not done already
         if !rmaker_mqtt::is_mqtt_initialized() {
             rmaker_mqtt::init_rmaker_mqtt()?;

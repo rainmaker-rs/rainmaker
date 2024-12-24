@@ -8,7 +8,11 @@ use rainmaker_components::{
     persistent_storage::{Nvs, NvsPartition},
 };
 
-use crate::{error::RMakerError, utils::wrap_in_arc_mutex, WrappedInArcMutex};
+use crate::{
+    error::RmakerMqttError,
+    utils::wrap_in_arc_mutex,
+    WrappedInArcMutex,
+};
 
 pub(crate) trait TopicCb = Fn(ReceivedMessage) + Sync + Send + 'static;
 static MQTT_INNER: OnceLock<WrappedInArcMutex<MqttClient>> = OnceLock::new();
@@ -18,10 +22,10 @@ static PUBLISH_QUEUE: LazyLock<RwLock<HashMap<String, Vec<u8>>>> =
     LazyLock::new(|| RwLock::new(HashMap::new())); // topic -> payload
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn init_rmaker_mqtt() -> Result<(), RMakerError> {
+pub(crate) fn init_rmaker_mqtt() -> Result<(), RmakerMqttError> {
     // return error if mqtt is already initialized
     if is_mqtt_initialized() {
-        return Err(RMakerError("MQTT Already Initialized!".to_string()));
+        return Err(RmakerMqttError::AlreadyInitialized);
     }
 
     let fctry_partition = NvsPartition::new("fctry").unwrap();
@@ -29,14 +33,14 @@ pub(crate) fn init_rmaker_mqtt() -> Result<(), RMakerError> {
 
     let node_id = &crate::NODEID;
     let mut buff = vec![0; 2500];
-    let mut client_cert = fctry_nvs
-        .get_bytes("client_cert", &mut buff)
-        .unwrap()
-        .expect("Client Certificate not found in factory partition");
-    let mut private_key = fctry_nvs
-        .get_bytes("client_key", &mut buff)
-        .unwrap()
-        .expect("Client Key not found in factory partition");
+    let mut client_cert = match fctry_nvs.get_bytes("client_cert", &mut buff).unwrap() {
+        Some(cert) => cert,
+        None => return Err(RmakerMqttError::NodeCredentialsNotFound),
+    };
+    let mut private_key = match fctry_nvs.get_bytes("client_key", &mut buff).unwrap() {
+        Some(key) => key,
+        None => return Err(RmakerMqttError::NodeCredentialsNotFound),
+    };
     let mut server_cert = Vec::from(include_bytes!("../server_certs/rmaker_mqtt_server.crt"));
 
     client_cert.push(0);
@@ -109,19 +113,23 @@ fn mqtt_callback(event: MqttEvent) {
 pub(crate) fn connect(
     config: &MqttConfiguration,
     tls_config: &'static TLSconfiguration,
-) -> Result<(), RMakerError> {
+) -> Result<(), RmakerMqttError> {
     if is_mqtt_initialized() {
-        Err(RMakerError("MQTT Already Initialized!".to_string()))
-    } else {
-        let mqtt_client = MqttClient::new(config, tls_config, Box::new(mqtt_callback))?;
-        match MQTT_INNER.set(wrap_in_arc_mutex(mqtt_client)) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(RMakerError("Could not initialized MQTT!".to_string())),
-        }
+        return Err(RmakerMqttError::AlreadyInitialized);
     }
+
+    if let Ok(mqtt_client) = MqttClient::new(config, tls_config, Box::new(mqtt_callback)) {
+        return match MQTT_INNER.set(wrap_in_arc_mutex(mqtt_client)) {
+            Ok(_) => Ok(()),
+            // This error should never occur
+            Err(_) => unreachable!(),
+        };
+    }
+
+    return Err(RmakerMqttError::OtherError);
 }
 
-pub(crate) fn publish(topic: &str, payload: Vec<u8>) -> Result<(), RMakerError> {
+pub(crate) fn publish(topic: &str, payload: Vec<u8>) -> Result<(), RmakerMqttError> {
     match MQTT_INNER.get() {
         Some(client) => {
             if CONNECTED.load(std::sync::atomic::Ordering::SeqCst) {
@@ -139,21 +147,25 @@ pub(crate) fn publish(topic: &str, payload: Vec<u8>) -> Result<(), RMakerError> 
             }
         }
         None => {
-            return Err(RMakerError("MQTT Not Initialized".to_string()));
+            return Err(RmakerMqttError::AlreadyInitialized);
         }
     };
 
     Ok(())
 }
 
-pub(crate) fn subscribe(topic: &str, cb: impl TopicCb) -> Result<(), RMakerError> {
+pub(crate) fn subscribe(topic: &str, cb: impl TopicCb) -> Result<(), RmakerMqttError> {
     match MQTT_INNER.get() {
         Some(client) => {
             if CONNECTED.load(std::sync::atomic::Ordering::SeqCst) {
-                client
+                if client
                     .lock()
                     .unwrap()
-                    .subscribe(topic, &QoSLevel::AtLeastOnce)?;
+                    .subscribe(topic, &QoSLevel::AtLeastOnce)
+                    .is_err()
+                {
+                    return Err(RmakerMqttError::OtherError);
+                };
             }
 
             MQTT_CBS
@@ -162,7 +174,7 @@ pub(crate) fn subscribe(topic: &str, cb: impl TopicCb) -> Result<(), RMakerError
                 .insert(topic.to_owned(), Box::new(cb));
         }
         None => {
-            return Err(RMakerError("MQTT Not Initialized".to_string()));
+            return Err(RmakerMqttError::NotInitialized);
         }
     };
 
