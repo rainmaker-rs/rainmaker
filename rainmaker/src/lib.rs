@@ -190,6 +190,7 @@ impl Rainmaker {
             let node_id = claimdata_path.join("node.info");
             let client_cert = claimdata_path.join("node.crt");
             let client_key = claimdata_path.join("node.key");
+            let random = claimdata_path.join("random.info");
 
             if !node_id.exists() || !client_cert.exists() || !client_key.exists() {
                 panic!("Claimdata folder doesn't contain valid data");
@@ -208,6 +209,12 @@ impl Rainmaker {
                 .set_bytes(
                     "client_key",
                     fs::read_to_string(client_key).unwrap().as_bytes(),
+                )
+                .unwrap();
+            rmaker_namespace
+                .set_bytes(
+                    "random",
+                    fs::read_to_string(random).unwrap().as_bytes(),
                 )
                 .unwrap();
         }
