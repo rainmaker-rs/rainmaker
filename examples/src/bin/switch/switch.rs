@@ -1,8 +1,10 @@
 use anyhow::Result;
 use examples::{connect_wifi, initializse_logger};
+use rainmaker::components::persistent_storage::NvsPartition;
 use rainmaker::components::wifi::WifiMgr;
 use rainmaker::{
     device::{Device, DeviceType},
+    factory,
     node::Node,
     param::Param,
     Rainmaker,
@@ -33,8 +35,12 @@ fn switch_cb(params: HashMap<String, Value>) {
 fn main() -> Result<()> {
     initializse_logger();
 
+    let factory_partition = NvsPartition::new("fctry")?;
+    // factory partition initialization should be performed before Rainmaker::init()
+    factory::init(factory_partition)?;
+
     let rmaker = Rainmaker::init()?;
-    let mut node = Node::new(rmaker.get_node_id());
+    let mut node = Node::new(rmaker.get_node_id().to_string());
     node.set_info(rainmaker::node::Info {
         name: "Switch Example Node".to_string(),
         fw_version: "v1.0".to_string(),

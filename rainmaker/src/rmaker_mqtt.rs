@@ -3,16 +3,11 @@ use std::{
     sync::{atomic::AtomicBool, LazyLock, OnceLock, RwLock},
 };
 
-use rainmaker_components::{
-    mqtt::{MqttClient, MqttConfiguration, MqttEvent, QoSLevel, ReceivedMessage, TLSconfiguration},
-    persistent_storage::{Nvs, NvsPartition},
+use rainmaker_components::mqtt::{
+    MqttClient, MqttConfiguration, MqttEvent, QoSLevel, ReceivedMessage, TLSconfiguration,
 };
 
-use crate::{
-    error::RmakerMqttError,
-    utils::wrap_in_arc_mutex,
-    WrappedInArcMutex,
-};
+use crate::{error::RmakerMqttError, factory, utils::wrap_in_arc_mutex, WrappedInArcMutex};
 
 pub(crate) trait TopicCb = Fn(ReceivedMessage) + Sync + Send + 'static;
 static MQTT_INNER: OnceLock<WrappedInArcMutex<MqttClient>> = OnceLock::new();
@@ -28,18 +23,19 @@ pub(crate) fn init_rmaker_mqtt() -> Result<(), RmakerMqttError> {
         return Err(RmakerMqttError::AlreadyInitialized);
     }
 
-    let fctry_partition = NvsPartition::new("fctry").unwrap();
-    let fctry_nvs = Nvs::new(fctry_partition, "rmaker_creds").unwrap();
+    let mut buff = [0u8; 2500];
 
-    let node_id = &crate::NODEID;
-    let mut buff = vec![0; 2500];
-    let mut client_cert = match fctry_nvs.get_bytes("client_cert", &mut buff).unwrap() {
-        Some(cert) => cert,
-        None => return Err(RmakerMqttError::NodeCredentialsNotFound),
+    let node_id = match factory::get_node_id(&mut buff) {
+        Ok(node_id) => node_id,
+        Err(_) => return Err(RmakerMqttError::NodeCredentialsNotFound),
     };
-    let mut private_key = match fctry_nvs.get_bytes("client_key", &mut buff).unwrap() {
-        Some(key) => key,
-        None => return Err(RmakerMqttError::NodeCredentialsNotFound),
+    let mut client_cert = match factory::get_client_cert(&mut buff) {
+        Ok(cert) => cert,
+        Err(_) => return Err(RmakerMqttError::NodeCredentialsNotFound),
+    };
+    let mut private_key = match factory::get_client_key(&mut buff) {
+        Ok(key) => key,
+        Err(_) => return Err(RmakerMqttError::NodeCredentialsNotFound),
     };
     let mut server_cert = Vec::from(include_bytes!("../server_certs/rmaker_mqtt_server.crt"));
 

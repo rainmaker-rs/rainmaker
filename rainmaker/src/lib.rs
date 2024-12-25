@@ -8,6 +8,7 @@
 
 pub mod device;
 pub mod error;
+pub mod factory;
 pub mod node;
 pub mod param;
 pub(crate) mod proto;
@@ -16,46 +17,37 @@ pub(crate) mod utils;
 mod constants;
 mod rmaker_mqtt;
 
-// expose rainmaker_components crate for use in downstream crates
 use constants::*;
 use error::RmakerError;
 use node::Node;
 use proto::esp_rmaker_user_mapping::*;
 use quick_protobuf::{MessageWrite, Writer};
+// expose rainmaker_components crate for use in downstream crates
 pub use rainmaker_components as components;
 use rainmaker_components::{
     mqtt::ReceivedMessage,
-    persistent_storage::{Nvs, NvsPartition},
     wifi_prov::{WiFiProvTransportTrait, WifiProvMgr},
 };
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
-    sync::{Arc, LazyLock, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock},
     thread,
     time::Duration,
 };
 
 #[cfg(target_os = "linux")]
+use rainmaker_components::persistent_storage::{Nvs, NvsPartition};
+#[cfg(target_os = "linux")]
 use std::{env, fs, path::Path};
 
 pub(crate) type WrappedInArcMutex<T> = Arc<Mutex<T>>;
-
-static NODEID: LazyLock<String> = LazyLock::new(|| {
-    let fctry_partition = NvsPartition::new("fctry").unwrap();
-    let fctry_nvs = Nvs::new(fctry_partition, "rmaker_creds").unwrap();
-    let mut buff = [0; 32];
-    let bytes = fctry_nvs
-        .get_bytes("node_id", &mut buff)
-        .unwrap()
-        .expect("Node id not found in NVS");
-    String::from_utf8(bytes).unwrap()
-});
 
 /// A struct for RainMaker Agent.
 #[derive(Debug)]
 pub struct Rainmaker {
     node: Option<Arc<node::Node>>,
+    node_id: String,
 }
 
 static mut RAINMAKER: OnceLock<Rainmaker> = OnceLock::new();
@@ -74,7 +66,7 @@ impl Rainmaker {
     ///   - For Linux:
     ///     1. Create directories for storing persistent data
     ///         ```bash
-    ///             mkdir -p ~/.config/rmaker/fctry    
+    ///             mkdir -p ~/.config/rmaker/fctry
     ///             mkdir -p ~/.config/rmaker/nvs
     ///         ```
     ///     2. Fetch claim data using rainmaker cli
@@ -91,14 +83,21 @@ impl Rainmaker {
             return Err(RmakerError::AlreadyInitialized);
         }
         unsafe {
-            RAINMAKER.set(Self { node: None }).unwrap();
+            let mut buff = [0u8; 32];
+            let node_id = factory::get_node_id(&mut buff)?;
+            RAINMAKER
+                .set(Self {
+                    node: None,
+                    node_id,
+                })
+                .unwrap();
         }
         Ok(unsafe { RAINMAKER.get_mut().unwrap() })
     }
 
     /// Returns Node ID.
-    pub fn get_node_id(&self) -> String {
-        NODEID.to_string()
+    pub fn get_node_id(&self) -> &str {
+        &self.node_id
     }
 
     /// Starts the RainMaker core task which includes connect to RainMaker cloud over MQTT if hasn't been already.
@@ -112,7 +111,7 @@ impl Rainmaker {
         }
 
         let curr_node = &self.node;
-        let node_id = NODEID.to_string();
+        let node_id = self.get_node_id();
         let node_config_topic = format!("node/{}/{}", node_id, NODE_CONFIG_TOPIC_SUFFIX);
         let params_local_init_topic =
             format!("node/{}/{}", node_id, NODE_PARAMS_LOCAL_INIT_TOPIC_SUFFIX);
@@ -159,7 +158,7 @@ impl Rainmaker {
     ///
     /// This should be called before `WiFiProvMgr::start()`
     pub fn reg_user_mapping_ep<T: WiFiProvTransportTrait>(&self, prov_mgr: &mut WifiProvMgr<T>) {
-        let node_id = self.get_node_id();
+        let node_id = self.get_node_id().to_string();
         prov_mgr.add_endpoint(
             "cloud_user_assoc",
             Box::new(move |ep, data| -> Vec<u8> { cloud_user_assoc_callback(ep, data, &node_id) }),
@@ -293,10 +292,9 @@ pub fn report_params(device_name: &str, params: HashMap<String, Value>) {
         device_name: params
     });
 
-    let local_params_topic = format!(
-        "node/{}/{}",
-        NODEID.as_str(),
-        NODE_PARAMS_LOCAL_TOPIC_SUFFIX
-    );
+    // TODO: cache this value somewhere?
+    let mut buff = [0u8; 32];
+    let node_id = factory::get_node_id(&mut buff).unwrap();
+    let local_params_topic = format!("node/{}/{}", node_id, NODE_PARAMS_LOCAL_TOPIC_SUFFIX);
     rmaker_mqtt::publish(&local_params_topic, updated_params.to_string().into_bytes()).unwrap();
 }
