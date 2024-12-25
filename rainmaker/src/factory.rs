@@ -34,16 +34,16 @@ pub fn get_client_random(buff: &mut [u8]) -> Result<Vec<u8>, RmakerFactoryError>
     get_bytes_factory("random", buff)
 }
 
-fn get_bytes_factory(nvs_key: &str, buff: &mut [u8]) -> Result<Vec<u8>, RmakerFactoryError>{
+fn get_bytes_factory(nvs_key: &str, buff: &mut [u8]) -> Result<Vec<u8>, RmakerFactoryError> {
     let factory_partition = match PARTITION.get() {
         Some(partition) => partition,
         None => return Err(RmakerFactoryError::NotInitialized),
     };
-    let nvs = match Nvs::new(factory_partition.clone(), "rmaker_creds"){
+    let nvs = match Nvs::new(factory_partition.clone(), "rmaker_creds") {
         Ok(nvs) => nvs,
         Err(_) => return Err(RmakerFactoryError::PartitionNotFound),
     };
-    let bytes = match nvs.get_bytes(nvs_key, buff){
+    let bytes = match nvs.get_bytes(nvs_key, buff) {
         Ok(Some(bytes)) => bytes,
         _ => return Err(RmakerFactoryError::ValueReadError),
     };

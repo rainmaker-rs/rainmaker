@@ -212,10 +212,7 @@ impl Rainmaker {
                 )
                 .unwrap();
             rmaker_namespace
-                .set_bytes(
-                    "random",
-                    fs::read_to_string(random).unwrap().as_bytes(),
-                )
+                .set_bytes("random", fs::read_to_string(random).unwrap().as_bytes())
                 .unwrap();
         }
     }

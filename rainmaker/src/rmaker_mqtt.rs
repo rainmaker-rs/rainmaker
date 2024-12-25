@@ -122,7 +122,7 @@ pub(crate) fn connect(
         };
     }
 
-    return Err(RmakerMqttError::OtherError);
+    Err(RmakerMqttError::OtherError)
 }
 
 pub(crate) fn publish(topic: &str, payload: Vec<u8>) -> Result<(), RmakerMqttError> {
@@ -153,15 +153,14 @@ pub(crate) fn publish(topic: &str, payload: Vec<u8>) -> Result<(), RmakerMqttErr
 pub(crate) fn subscribe(topic: &str, cb: impl TopicCb) -> Result<(), RmakerMqttError> {
     match MQTT_INNER.get() {
         Some(client) => {
-            if CONNECTED.load(std::sync::atomic::Ordering::SeqCst) {
-                if client
+            if CONNECTED.load(std::sync::atomic::Ordering::SeqCst)
+                && client
                     .lock()
                     .unwrap()
                     .subscribe(topic, &QoSLevel::AtLeastOnce)
                     .is_err()
-                {
-                    return Err(RmakerMqttError::OtherError);
-                };
+            {
+                return Err(RmakerMqttError::OtherError);
             }
 
             MQTT_CBS
