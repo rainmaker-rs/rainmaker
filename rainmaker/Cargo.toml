@@ -1,6 +1,6 @@
 [package]
 name = "rainmaker"
-authors = ["Shreyash Bubane <bubaneshreyash3@gmail.com>", "Chinmay Dixit <chinmaydixit2303@gmail.com"]
+authors = ["Shreyash Bubane <bubaneshreyash3@gmail.com>", "Chinmay Dixit <chinmaydixit2303@gmail.com>", "Akshay Lahoti <akshaylahoti9@gmail.com>"]
 version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
@@ -22,6 +22,7 @@ serde = { version = "1.0.196", features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 quick-protobuf = "0.8.1"
 thiserror = "2.0.9"
+time = "0.3.37"
 
 [target.'cfg(target_os="linux")'.dependencies]
 simple_logger = "4.3.3"

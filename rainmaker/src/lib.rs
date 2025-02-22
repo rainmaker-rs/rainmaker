@@ -11,6 +11,7 @@ pub mod error;
 pub mod factory;
 pub mod node;
 pub mod param;
+pub(crate) mod schedules;
 pub(crate) mod proto;
 pub(crate) mod utils;
 
@@ -19,6 +20,7 @@ mod rmaker_mqtt;
 
 use constants::*;
 use error::RmakerError;
+use log::error;
 use node::Node;
 use proto::esp_rmaker_user_mapping::*;
 use quick_protobuf::{MessageWrite, Writer};
@@ -46,7 +48,7 @@ pub(crate) type WrappedInArcMutex<T> = Arc<Mutex<T>>;
 /// A struct for RainMaker Agent.
 #[derive(Debug)]
 pub struct Rainmaker {
-    node: Option<Arc<node::Node>>,
+    node: Option<Arc<Mutex<node::Node>>>,
     node_id: String,
 }
 
@@ -122,8 +124,9 @@ impl Rainmaker {
                 let node_config = serde_json::to_string(node.as_ref()).unwrap();
                 log::info!("publishing nodeconfig: {}", node_config);
                 rmaker_mqtt::publish(&node_config_topic, node_config.into())?;
+                let locked_node = node.lock().unwrap();
 
-                let init_params = node.get_param_values();
+                let init_params = locked_node.get_param_values();
                 let init_params = serde_json::to_string(&init_params).unwrap();
                 log::info!("publishing initial params: {}", init_params);
                 rmaker_mqtt::publish(&params_local_init_topic, init_params.into())?;
@@ -151,7 +154,7 @@ impl Rainmaker {
     /// ```
     ///
     pub fn register_node(&mut self, node: Node) {
-        self.node = Some(node.into());
+        self.node = Some(Arc::new(Mutex::new(node)));
     }
 
     /// Registers the endpoint used for claiming process with `WiFiProvMgr`. This is used for associating a RainMaker node with the user account performing the provisioning.
@@ -163,6 +166,14 @@ impl Rainmaker {
             "cloud_user_assoc",
             Box::new(move |ep, data| -> Vec<u8> { cloud_user_assoc_callback(ep, data, &node_id) }),
         )
+    }
+
+    pub fn enable_schedules(&self) {
+        if self.node.is_none() {
+            error!("Enable Schedules after Node registration");
+        } else {
+            schedules::enable_schedules(self.node.clone().unwrap());
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -216,15 +227,17 @@ impl Rainmaker {
                 .unwrap();
         }
     }
+
 }
 
-fn remote_params_callback(msg: ReceivedMessage, node: &Arc<Node>) {
+pub(crate) fn remote_params_callback(msg: ReceivedMessage, node: &Arc<Mutex<Node>>) {
     let received_val: HashMap<String, HashMap<String, Value>> =
         serde_json::from_str(&String::from_utf8(msg.payload).unwrap()).unwrap();
     let devices = received_val.keys();
+    let locked_node = node.lock().unwrap();
     for device in devices {
         let params = received_val.get(device).unwrap().to_owned();
-        node.exeute_device_callback(device, params);
+        locked_node.exeute_device_callback(device, params);
     }
 }
 

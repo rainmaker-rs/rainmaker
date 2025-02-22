@@ -12,7 +12,8 @@ use std::collections::HashSet;
 pub struct Param {
     name: String,
     param_type: ParamTypes,
-    ui_type: ParamUi,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ui_type: Option<ParamUi>,
     properties: HashSet<ParamProperty>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bounds: Option<ParamBounds>,
@@ -35,6 +36,7 @@ pub enum ParamValue {
     Bool(bool),
     Integer(i64),
     Float(f64),
+    Array(Vec<ParamValue>),
 }
 
 /// Set of the parameter type.
@@ -169,14 +171,13 @@ impl Param {
         initial_state: ParamValue,
         param_type: ParamTypes,
         properties: HashSet<ParamProperty>,
-        ui_type: ParamUi,
     ) -> Param {
         Param {
             name: name.to_owned(),
             value: initial_state,
             param_type,
             properties,
-            ui_type,
+            ui_type: None,
             bounds: None,
         }
     }
@@ -196,19 +197,25 @@ impl Param {
         self.bounds = Some(ParamBounds { min, max, step })
     }
 
+    pub fn add_ui(&mut self, ui: ParamUi) {
+        self.ui_type = Some(ui)
+    }
+
     /// Standard function to add Power parameter.
     pub fn new_power(name: &str, initial_value: bool) -> Self {
         let mut param_properties = HashSet::new();
         param_properties.insert(ParamProperty::Read);
         param_properties.insert(ParamProperty::Write);
 
-        Self::new(
+        let mut param = Self::new(
             name,
             ParamValue::Bool(initial_value),
             ParamTypes::Power,
             param_properties,
-            ParamUi::ToggleSwitch,
-        )
+        );
+
+        param.add_ui(ParamUi::ToggleSwitch);
+        param
     }
 
     /// Standard function to add Brightness parameter.
@@ -222,9 +229,9 @@ impl Param {
             ParamValue::Integer(initial_value as i64),
             ParamTypes::Brightness,
             param_properties,
-            ParamUi::Slider,
         );
         param.add_bounds(0, 100, 1);
+        param.add_ui(ParamUi::Slider);
 
         param
     }
@@ -240,9 +247,9 @@ impl Param {
             ParamValue::Integer(initial_value as i64),
             ParamTypes::Hue,
             param_properties,
-            ParamUi::HueSlider,
         );
         param.add_bounds(0, 360, 1);
+        param.add_ui(ParamUi::HueSlider);
 
         param
     }
@@ -258,10 +265,10 @@ impl Param {
             ParamValue::Integer(initial_value as i64),
             ParamTypes::Saturation,
             param_properties,
-            ParamUi::Slider,
         );
 
         param.add_bounds(0, 100, 1);
+        param.add_ui(ParamUi::Slider);
 
         param
     }
@@ -277,6 +284,7 @@ impl Serialize for ParamValue {
             ParamValue::Bool(_) => "bool",
             ParamValue::Integer(_) => "int",
             ParamValue::Float(_) => "float",
+            ParamValue::Array(_) => "array",
         })
     }
 }
@@ -288,6 +296,7 @@ impl From<ParamValue> for Value {
             ParamValue::Bool(v) => Self::Bool(v),
             ParamValue::Integer(v) => Self::Number(Number::from(v)),
             ParamValue::Float(v) => Self::Number(Number::from_f64(v).unwrap()),
+            ParamValue::Array(v) => Self::Array(v.into_iter().map(|item| item.into()).collect()),
         }
     }
 }

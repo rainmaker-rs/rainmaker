@@ -58,6 +58,7 @@ pub struct Node {
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     attributes: HashMap<String, String>,
     devices: Vec<Device>,
+    services: Vec<Device>,
 }
 
 impl Node {
@@ -75,6 +76,7 @@ impl Node {
             info: None,
             attributes: HashMap::new(),
             devices: Vec::new(),
+            services: Vec::new(),
         }
     }
 
@@ -108,6 +110,10 @@ impl Node {
         self.devices.push(device);
     }
 
+    pub(crate) fn add_service(&mut self, service: Device) {
+        self.services.push(service);
+    }
+
     pub(crate) fn get_param_values(&self) -> HashMap<&str, HashMap<&str, Value>> {
         let mut params = HashMap::<&str, HashMap<&str, Value>>::new();
         for dev in &self.devices {
@@ -125,7 +131,13 @@ impl Node {
         for device in self.devices.iter() {
             if device.name() == device_name {
                 device.execute_callback(params);
-                break;
+                return;
+            }
+        }
+        for service in self.services.iter() {
+            if service.name() == device_name {
+                service.execute_callback(params);
+                return;
             }
         }
     }

@@ -177,6 +177,12 @@ pub enum DeviceType {
     SecurityPanel,
     #[serde(rename = "esp.device.water-heater")]
     X,
+
+// Services listed here too but to be used internally only
+    #[serde(rename = "esp.service.schedules")]
+    Schedule,
+
+
     #[serde(rename = "esp.device.other")]
     OTHER,
 }

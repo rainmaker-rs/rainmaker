@@ -2,5 +2,6 @@
 /ignored
 /.idea
 /.vscode
-/espflash.toml
+espflash.toml
 /.embuild
+/Cargo.lock

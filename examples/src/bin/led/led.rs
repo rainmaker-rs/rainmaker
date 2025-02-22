@@ -164,6 +164,7 @@ pub fn main() -> Result<()> {
     node.add_device(led_device);
 
     rmaker.register_node(node);
+    rmaker.enable_schedules();
     rmaker.start()?;
 
     log::info!("Rainmaker agent is started");
