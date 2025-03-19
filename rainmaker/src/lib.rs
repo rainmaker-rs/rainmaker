@@ -11,6 +11,7 @@ pub mod error;
 pub mod factory;
 pub mod node;
 pub mod param;
+pub(crate) mod time_service;
 pub(crate) mod schedules;
 pub(crate) mod proto;
 pub(crate) mod utils;
@@ -172,6 +173,7 @@ impl Rainmaker {
         if self.node.is_none() {
             error!("Enable Schedules after Node registration");
         } else {
+            time_service::enable_timezone(self.node.clone().unwrap(), "".to_owned(), "".to_owned());
             schedules::enable_schedules(self.node.clone().unwrap());
         }
     }
@@ -313,5 +315,6 @@ pub fn report_params(device_name: &str, params: HashMap<String, Value>) {
     let mut buff = [0u8; 32];
     let node_id = factory::get_node_id(&mut buff).unwrap();
     let local_params_topic = format!("node/{}/{}", node_id, NODE_PARAMS_LOCAL_TOPIC_SUFFIX);
+    log::info!("Reporting update: {}", updated_params.to_string());
     rmaker_mqtt::publish(&local_params_topic, updated_params.to_string().into_bytes()).unwrap();
 }

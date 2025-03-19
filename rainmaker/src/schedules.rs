@@ -3,18 +3,19 @@
 //"Power":true,"Saturation":100}},"triggers":[{"m":980,"d":127}]}]}
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, to_string, Value};
 
 use crate::param::{ Param, ParamTypes, ParamProperty, ParamValue };
 use crate::device::{ Device, DeviceType };
 use crate::node::Node;
+use crate::report_params;
 
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::collections::{HashMap, HashSet};
 use std::thread;
 use std::time::Duration;
 
-use time::{OffsetDateTime, Weekday};
+use time::Weekday;
 
 // Default value of Schedule in the app as a Service
 const SERVICE_NAME: &str = "Schedule";
@@ -67,12 +68,12 @@ impl PrivScheduleData {
 
 pub(self) static SCHEDULE: OnceLock<RwLock<PrivScheduleData>> = OnceLock::new();
 
-fn get_shedule_data() -> &'static RwLock<PrivScheduleData> {
+fn get_schedule_data() -> &'static RwLock<PrivScheduleData> {
     SCHEDULE.get_or_init(|| RwLock::new(PrivScheduleData::new()))
 }
 
 fn get_current_minutes_and_weekday() -> (u16, u8) {
-    let curr_time = time::OffsetDateTime::now_local().unwrap();
+    let curr_time = time::OffsetDateTime::now_utc();
     let mins: u16 = ((curr_time.hour() as u16) * 60) + (curr_time.minute() as u16);
     let weekday = curr_time.weekday();
     let weekday_in_u8: u8 = match weekday {
@@ -128,14 +129,14 @@ fn execute_schedule_action(schedule: &Schedule, node: &Arc<Mutex<Node>>) {
 
 pub(crate) fn wait_for_next_trigger(node: &Arc<Mutex<Node>>) {
     loop {
-        let rwlock = get_shedule_data();
+        let rwlock = get_schedule_data();
         let priv_schedules = rwlock.read().unwrap();
         let schedules = &priv_schedules.schedule_list;
         if let Some((schedule, wait_time)) = find_next_trigger(&schedules) {            
-            log::info!(
-                "Next trigger for {} in {} minutes",
-                schedule.name, wait_time
-            );
+            // log::info!(
+            //     "Next trigger for {} in {} minutes",
+            //     schedule.name, wait_time
+            // );
 
             thread::sleep(Duration::from_secs((wait_time * 60) as u64));
             if schedule.triggers[0].d == 0 {
@@ -158,12 +159,16 @@ pub(crate) fn schedule_callback(params: HashMap<String, Value>) {
     log::info!("Received update: {:?}", params);
     
     for (key, value) in params {
+        log::info!("Step 1");
         match key.as_str() {
             PARAM_NAME => {
+            log::info!("Step 2");
+
                 if let Value::Array(arr) = value {
                     let scheds: Vec<HashMap<String, Value>> = arr.iter()
                         .filter_map(|v| v.as_object().map(|m| m.iter().map(|(k,v)| (k.clone(), v.clone())).collect()))
                         .collect();
+                    log::info!("Step 3");
 
                     for sched in scheds {
                         let mut name: Option<String> = None;
@@ -171,11 +176,36 @@ pub(crate) fn schedule_callback(params: HashMap<String, Value>) {
                         let mut action: Option<HashMap<String, HashMap<String, Value>>> = None;
                         let mut triggers: Option<Vec<Trigger>> = None;
                         let mut operation: Option<String> = None;
+                        log::info!("Step 4");
+
                         for (k, v) in sched {
                             match k.as_str() {
                                 "name" => name = Some(v.as_str().unwrap().to_string()),
                                 "id" => id = Some(v.as_str().unwrap().to_string()),
-                                "action" => action = serde_json::from_str(v.as_str().unwrap()).unwrap(),
+                                "action" => {
+                                    action = Some(
+                                        
+                                        v.as_object()
+                                            .map(|dev| {
+                                                dev.iter()
+                                                    .filter_map(|(device, params)| {
+                                                        if let Some(p) = params.as_object() {
+                                                            let inner_map: HashMap<String, Value> = p
+                                                                .iter()
+                                                                .map(|(k, v)| (k.clone(), v.clone()))
+                                                                .collect();
+                                                            log::info!("Step 5");   
+
+                                                            Some((device.clone(), inner_map))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect()
+                                            })
+                                            .unwrap_or_default()
+                                    );
+                                },
                                 "operation" => operation = Some(v.as_str().unwrap().to_string()),
                                 "triggers" => {
                                     triggers = v.as_array().map(|arr| {
@@ -200,6 +230,8 @@ pub(crate) fn schedule_callback(params: HashMap<String, Value>) {
                                 _ => log::debug!("Received Unknown Value in Schedules"),
                             }
                         }
+                        log::info!("Step 6");
+
                         match operation.unwrap().as_str() {
                             "add" => add_schedule(id, name, action, triggers),
                             "edit" => edit_schedule(id, name, action, triggers),
@@ -210,10 +242,10 @@ pub(crate) fn schedule_callback(params: HashMap<String, Value>) {
                         }
                     }
                 } else {
-                    log::warn!("Expected an array of strings for '{}', but got: {:?}", key, value);
+                    // log::warn!("Expected an array of strings for '{}', but got: {:?}", key, value);
                 }
             },
-            _ => log::debug!("Invalid parameter received in schedules: {}", key),
+            _ => log::debug!("Invalid parameter in schedules: {}", key),
         }
     }
 }
@@ -222,7 +254,8 @@ pub(crate) fn enable_schedules(node: Arc<Mutex<Node>>) {
     let mut param_properties = HashSet::new();
     param_properties.insert(ParamProperty::Read);
     param_properties.insert(ParamProperty::Write);
-    let schedules = Param::new(PARAM_NAME, ParamValue::Array(vec![]), ParamTypes::Schedules, param_properties);
+    let mut schedules = Param::new(PARAM_NAME, ParamValue::Array(vec![]), ParamTypes::Schedules, param_properties);
+    schedules.add_bounds(0, 10, 1);
     let mut schedule =  Device::new(SERVICE_NAME, DeviceType::Schedule);
     schedule.add_param(schedules);
     schedule.register_callback(Box::new(schedule_callback));
@@ -239,8 +272,8 @@ fn add_schedule(id: Option<String>, name: Option<String>, action: Option<HashMap
     let name = name.unwrap();
     let action = action.unwrap();
     let triggers = triggers.unwrap();
-
-    let mut locked_schd = get_shedule_data().write().unwrap();
+    log::info!("Step 7");
+    let mut locked_schd = get_schedule_data().write().unwrap();
     if locked_schd.total_schedules < MAX_SCHEDULES {
         let schd: Schedule = Schedule {
             name: name.to_string(),
@@ -255,8 +288,11 @@ fn add_schedule(id: Option<String>, name: Option<String>, action: Option<HashMap
                 return;
             }
         }
+        let mut reportable_schd: HashMap<String, Value> = HashMap::new();
+        reportable_schd.insert(PARAM_NAME.to_owned(), serde_json::to_value(&schd).unwrap());
         locked_schd.schedule_list.push(schd);
         locked_schd.total_schedules += 1;
+        report_params(SERVICE_NAME, reportable_schd);
     } else {
         log::error!("Max number of Schedules reached. Failed to create a Schedule.");
     }
@@ -267,9 +303,9 @@ fn add_schedule(id: Option<String>, name: Option<String>, action: Option<HashMap
 // "id":"URUE","name":"s1","operation":"edit","triggers":[{"d":127,"m":917}]}]}}
 fn edit_schedule(id: Option<String>, name: Option<String>, action: Option<HashMap<String, HashMap<String, Value>>>, triggers: Option<Vec<Trigger>>) {
     let id = id.unwrap();
-    let mut locked_schd = get_shedule_data().write().unwrap();
+    let mut locked_schd = get_schedule_data().write().unwrap();
     let mut found = false;
-    for mut schedule in &mut locked_schd.schedule_list {
+    for schedule in &mut locked_schd.schedule_list {
         if schedule.id == id {
             found = true;
             if name.is_some() {
@@ -291,7 +327,7 @@ fn edit_schedule(id: Option<String>, name: Option<String>, action: Option<HashMa
 
 fn remove_schedule(id: Option<String>) {
     let id = id.unwrap();
-    let mut locked_schd = get_shedule_data().write().unwrap();
+    let mut locked_schd = get_schedule_data().write().unwrap();
     let mut idx = 0;
     for schedule in &mut locked_schd.schedule_list {
         if schedule.id == id {
@@ -306,7 +342,7 @@ fn remove_schedule(id: Option<String>) {
 // {"Schedule":{"Schedules":[{"id":"URUE","operation":"enable"}]}}
 fn enable_schedule(id: Option<String>) {
     let id = id.unwrap();
-    let mut locked_schd = get_shedule_data().write().unwrap();
+    let mut locked_schd = get_schedule_data().write().unwrap();
     for schedule in &mut locked_schd.schedule_list {
         if schedule.id == id {
             schedule.enabled = true;
@@ -317,7 +353,7 @@ fn enable_schedule(id: Option<String>) {
 // {"Schedule":{"Schedules":[{"id":"URUE","operation":"disable"}]}}
 fn disable_schedule(id: Option<String>) {
     let id = id.unwrap();
-    let mut locked_schd = get_shedule_data().write().unwrap();
+    let mut locked_schd = get_schedule_data().write().unwrap();
     for schedule in &mut locked_schd.schedule_list {
         if schedule.id == id {
             schedule.enabled = false;

@@ -123,6 +123,13 @@ impl Node {
             }
             params.insert(dev.name(), curr_params);
         }
+        for sev in &self.services {
+            let mut curr_params = HashMap::<&str, Value>::new();
+            for p in sev.params() {
+                curr_params.insert(p.name(), p.value().clone().into());
+            }
+            params.insert(sev.name(), curr_params);
+        }
 
         params
     }

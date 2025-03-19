@@ -179,8 +179,10 @@ pub enum DeviceType {
     X,
 
 // Services listed here too but to be used internally only
-    #[serde(rename = "esp.service.schedules")]
+    #[serde(rename = "esp.service.schedule")]
     Schedule,
+    #[serde(rename = "esp.service.time")]
+    Time,
 
 
     #[serde(rename = "esp.device.other")]
